@@ -1,0 +1,11 @@
+# Phase 1: Dataset Preparation
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+PyYAML>=6.0
+Pillow>=10.0
+
+# Added in later phases:
+# tensorflow>=2.15        (Phase 3: feature extraction)
+# opencv-python>=4.8      (Phase 2: preprocessing)
+# streamlit>=1.30         (Phase 5: UI)

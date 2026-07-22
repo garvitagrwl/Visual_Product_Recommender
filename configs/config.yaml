@@ -1,0 +1,44 @@
+# Visual Product Recommendation Engine - Configuration
+# Central config so no paths/parameters are hardcoded in source code.
+
+seed: 42
+
+logging:
+  level: INFO
+  log_file: logs/pipeline.log
+
+dataset:
+  # Root of the raw Kaggle "Fashion Product Images Dataset" as downloaded
+  root_dir: dataset
+  images_dir: dataset/images
+  styles_csv: dataset/styles.csv
+  images_csv: dataset/images.csv
+
+# Mandatory dataset subsetting strategy (per problem-statement PDF).
+# Categories below are examples from the dataset's `articleType` column -
+# adjust once you've inspected the actual styles.csv (Phase 1 will print
+# the available article types and their counts to help you choose).
+subset:
+  category_column: articleType
+  categories:
+    - Tshirts
+    - Shirts
+    - Casual Shoes
+    - Sports Shoes
+    - Handbags
+    - Watches
+    - Sunglasses
+    - Dresses
+  min_samples_per_category: 200
+  max_samples_per_category: 300
+
+split:
+  train_ratio: 0.8
+  stratify_column: articleType
+
+data:
+  processed_dir: data
+  full_subset_csv: data/subset_full.csv
+  train_csv: data/train.csv
+  val_csv: data/val.csv
+  validation_report_json: data/validation_report.json

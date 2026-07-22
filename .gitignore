@@ -1,0 +1,12 @@
+dataset/*
+!dataset/.gitkeep
+data/*
+!data/.gitkeep
+embeddings/*
+!embeddings/.gitkeep
+models/*
+!models/.gitkeep
+logs/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
