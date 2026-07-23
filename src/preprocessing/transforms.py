@@ -79,6 +79,98 @@ def _load_image(path: tf.Tensor, image_size: Tuple[int, int]) -> tf.Tensor:
     return tf.cast(image, tf.float32)
 
 
+def load_and_preprocess_single_image(
+    path: str,
+    image_size: Tuple[int, int],
+    backbone: str,
+) -> tf.Tensor:
+    """Preprocess one image file the same way the catalog was preprocessed.
+
+    Used by the Phase 4 query pipeline for an uploaded image - reuses
+    the exact same resize + backbone-correct normalization as
+    `build_dataset(..., training=False)`, which is required for query
+    and catalog embeddings to be comparable.
+
+    Args:
+        path: Path to the image file.
+        image_size: Target (height, width), must match what the
+            catalog embeddings were generated with.
+        backbone: Backbone name, selects the matching preprocess_input.
+
+    Returns:
+        A (1, H, W, 3) float32 tensor ready to feed into the backbone.
+    """
+    image = _load_image(tf.constant(path), image_size)
+    preprocess_fn = get_preprocess_fn(backbone)
+    image = preprocess_fn(image)
+    return tf.expand_dims(image, axis=0)
+
+
+def build_labeled_dataset(
+    df: pd.DataFrame,
+    images_dir: str,
+    image_size: Tuple[int, int],
+    backbone: str,
+    batch_size: int,
+    category_column: str,
+    categories: list,
+    training: bool = False,
+    aug_config: dict | None = None,
+) -> tf.data.Dataset:
+    """Build a tf.data pipeline yielding (image, integer_label) pairs.
+
+    Used for Phase 6 fine-tuning, where a temporary classification
+    head needs a label per image. `categories` fixes the label index
+    order so it's identical between training and any later reuse of
+    the same encoding.
+
+    Args:
+        df: Metadata DataFrame with `image_filename` and the category
+            column (as produced by Phase 1).
+        images_dir: Directory containing the image files.
+        image_size: Target (height, width).
+        backbone: Backbone name, for correct normalization.
+        batch_size: Batch size.
+        category_column: Column name holding the category label
+            (e.g. "articleType").
+        categories: Fixed, ordered list of category strings - defines
+            the integer label each maps to (index in this list).
+        training: If True, shuffles and applies augmentation.
+        aug_config: Required if `training=True` and augmentation is enabled.
+
+    Returns:
+        A batched, prefetched `tf.data.Dataset` yielding
+        (image_batch, label_batch) where labels are integer class indices.
+    """
+    category_to_index = {cat: i for i, cat in enumerate(categories)}
+    paths = (images_dir.rstrip("/") + "/" + df["image_filename"]).tolist()
+    labels = df[category_column].map(category_to_index).tolist()
+
+    ds = tf.data.Dataset.from_tensor_slices((paths, labels))
+
+    if training:
+        ds = ds.shuffle(buffer_size=len(paths), seed=42, reshuffle_each_iteration=True)
+
+    preprocess_fn = get_preprocess_fn(backbone)
+
+    def _map_fn(path, label):
+        image = _load_image(path, image_size)
+        image = preprocess_fn(image)
+        return image, label
+
+    ds = ds.map(_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+
+    if training and aug_config is not None and aug_config.get("enabled", False):
+        aug_layer = build_augmentation_layer(aug_config)
+        ds = ds.map(
+            lambda image, label: (aug_layer(image, training=True), label),
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
+
+    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    return ds
+
+
 def build_dataset(
     df: pd.DataFrame,
     images_dir: str,

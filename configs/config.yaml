@@ -55,3 +55,18 @@ preprocessing:
     random_rotation: 0.1     # fraction of 2*pi
     random_zoom: 0.1
     random_contrast: 0.1
+embeddings:
+  output_dir: embeddings
+  baseline_path: embeddings/baseline_embeddings.npz
+  baseline_metadata_path: embeddings/baseline_embeddings_metadata.json
+  transfer_learning_path: embeddings/transfer_learning_embeddings.npz
+  transfer_learning_metadata_path: embeddings/transfer_learning_embeddings_metadata.json
+retrieval:
+  top_k: 5
+training:
+  unfreeze_last_n_layers: 15
+  epochs: 15
+  learning_rate: 0.0001
+  early_stopping_patience: 3
+  checkpoint_path: models/transfer_learning_resnet50.weights.h5
+  history_path: models/transfer_learning_history.json
