@@ -42,3 +42,16 @@ data:
   train_csv: data/train.csv
   val_csv: data/val.csv
   validation_report_json: data/validation_report.json
+
+model:
+  backbone: resnet50  # options: resnet50, efficientnetb0
+
+preprocessing:
+  image_size: [224, 224]
+  batch_size: 32
+  augmentation:
+    enabled: true
+    random_flip: "horizontal"
+    random_rotation: 0.1     # fraction of 2*pi
+    random_zoom: 0.1
+    random_contrast: 0.1
