@@ -1,19 +1,27 @@
-"""Phase 4 entry point: Similarity Search.
+"""Similarity Search entry point - supports querying against either
+the baseline (Phase 4) or transfer-learning (Phase 6) embeddings.
 
-Given an uploaded image, finds and prints the top-K visually similar
-products from the catalog, using the baseline embeddings from Phase 3.
+Critical detail: the query image must be embedded with the SAME
+backbone weights that generated the catalog embeddings it's being
+compared against. Using fresh ImageNet weights to embed a query
+while comparing it to fine-tuned catalog embeddings would compare
+two different embedding spaces - so --stage controls both which
+embeddings file loads AND which backbone weights embed the query.
 
 Usage:
-    python recommend.py --image path/to/query.jpg
-    python recommend.py --image path/to/query.jpg --top-k 10
+    python recommend.py --image path/to/query.jpg --stage baseline
+    python recommend.py --image path/to/query.jpg --stage transfer_learning
+    python recommend.py --image path/to/query.jpg --stage transfer_learning --top-k 10
 """
 
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pandas as pd
 
+from build_embeddings import STAGE_CONFIG_KEYS
 from src.feature_extraction.backbone import build_backbone
 from src.feature_extraction.embedder import load_embeddings
 from src.retrieval.cosine_index import CosineSimilarityIndex
@@ -23,7 +31,7 @@ from src.utils.logger import get_logger
 from src.utils.seed import set_seed
 
 
-def main(config_path: str, image_path: str, top_k: int | None) -> None:
+def main(config_path: str, image_path: str, stage: str, top_k: int | None) -> None:
     config = load_config(config_path)
     set_seed(config["seed"])
 
@@ -37,8 +45,11 @@ def main(config_path: str, image_path: str, top_k: int | None) -> None:
     backbone_name = config["model"]["backbone"]
     image_size = tuple(config["preprocessing"]["image_size"])
 
-    logger.info("Loading catalog embeddings from %s", config["embeddings"]["baseline_path"])
-    ids, embeddings = load_embeddings(config["embeddings"]["baseline_path"])
+    keys = STAGE_CONFIG_KEYS[stage]
+    embeddings_path = config["embeddings"][keys["output_path"]]
+
+    logger.info("Stage: %s | Loading catalog embeddings from %s", stage, embeddings_path)
+    ids, embeddings = load_embeddings(embeddings_path)
 
     logger.info("Building cosine similarity index (%d items)", len(ids))
     index = CosineSimilarityIndex()
@@ -46,6 +57,16 @@ def main(config_path: str, image_path: str, top_k: int | None) -> None:
 
     logger.info("Loading backbone: %s", backbone_name)
     model = build_backbone(backbone_name, image_size)
+
+    if stage == "transfer_learning":
+        checkpoint_path = config["training"]["checkpoint_path"]
+        if not Path(checkpoint_path).exists():
+            raise FileNotFoundError(
+                f"No fine-tuned weights found at {checkpoint_path}. "
+                "Run `python train.py` (Phase 6) first, or use --stage baseline."
+            )
+        model.load_weights(checkpoint_path)
+        logger.info("Loaded fine-tuned weights from %s (query will use the SAME weights as the catalog)", checkpoint_path)
 
     metadata_df = pd.read_csv(config["data"]["full_subset_csv"])
     metadata_df["id"] = metadata_df["id"].astype(str)
@@ -61,7 +82,7 @@ def main(config_path: str, image_path: str, top_k: int | None) -> None:
     logger.info("Querying with image: %s (top_k=%d)", image_path, top_k)
     results = pipeline.recommend(image_path, top_k)
 
-    print(f"\nTop {len(results)} visually similar products for: {image_path}\n")
+    print(f"\n[{stage}] Top {len(results)} visually similar products for: {image_path}\n")
     for rank, result in enumerate(results, start=1):
         print(
             f"{rank}. [{result.similarity_score:.4f}] {result.product_display_name} "
@@ -71,9 +92,16 @@ def main(config_path: str, image_path: str, top_k: int | None) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 4: Similarity Search")
+    parser = argparse.ArgumentParser(description="Similarity Search (baseline / transfer_learning)")
     parser.add_argument("--config", type=str, default="configs/config.yaml")
     parser.add_argument("--image", type=str, required=True, help="Path to query image")
+    parser.add_argument(
+        "--stage",
+        type=str,
+        default="baseline",
+        choices=list(STAGE_CONFIG_KEYS.keys()),
+        help="Which embeddings/weights to use for the query",
+    )
     parser.add_argument("--top-k", type=int, default=None, help="Override config's retrieval.top_k")
     args = parser.parse_args()
-    main(args.config, args.image, args.top_k)
+    main(args.config, args.image, args.stage, args.top_k)
