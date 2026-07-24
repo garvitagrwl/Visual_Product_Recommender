@@ -85,3 +85,8 @@ siamese:
   early_stopping_patience: 3
   checkpoint_path: models/siamese_resnet50.weights.h5
   history_path: models/siamese_history.json
+
+evaluation:
+  k_values: [5, 10]
+  results_csv: reports/evaluation_results.csv
+  chart_path: reports/evaluation_comparison.png

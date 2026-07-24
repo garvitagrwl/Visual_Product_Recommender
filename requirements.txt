@@ -6,8 +6,6 @@ PyYAML>=6.0
 Pillow>=10.0
 tensorflow>=2.15
 streamlit>=1.30
+matplotlib>=3.7
 
-# Added in later phases:
-# tensorflow>=2.15        (Phase 3: feature extraction)
-# opencv-python>=4.8      (Phase 2: preprocessing)
-# streamlit>=1.30         (Phase 5: UI)
+

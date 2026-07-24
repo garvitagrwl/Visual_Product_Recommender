@@ -1,8 +1,8 @@
-"""Phase 5 entry point: Streamlit UI.
-
-Upload an image, preview it, and see the top-K visually similar
-products from the catalog - same pipeline as recommend.py (Phase 4),
-just wrapped in a UI instead of the CLI.
+"""Streamlit UI - lets the user pick which trained stage to query
+against (baseline / transfer_learning / siamese), defaulting to
+"siamese" since Phase 8's evaluation showed it's the best-performing
+stage overall (Precision@5: 0.9475 vs 0.9400 transfer_learning vs
+0.9225 baseline).
 
 Usage:
     streamlit run app.py
@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.feature_extraction.backbone import build_backbone
+from build_embeddings import STAGE_CONFIG, load_stage_model
 from src.feature_extraction.embedder import load_embeddings
 from src.retrieval.cosine_index import CosineSimilarityIndex
 from src.retrieval.query_pipeline import RecommendationPipeline
@@ -25,16 +25,19 @@ from src.utils.logger import get_logger
 from src.utils.seed import set_seed
 
 CONFIG_PATH = "configs/config.yaml"
+DEFAULT_STAGE = "siamese"  # best Precision@K in Phase 8's evaluation
 
 
 @st.cache_resource(show_spinner="Loading model and building similarity index...")
-def load_pipeline(config_path: str) -> tuple[RecommendationPipeline, dict]:
-    """Load everything the app needs once, cached across reruns.
+def load_pipeline(config_path: str, stage: str) -> tuple[RecommendationPipeline, dict]:
+    """Load everything the app needs for one stage, cached per stage.
+
+    Streamlit's cache_resource keys on all arguments, so switching
+    `stage` in the sidebar loads (and then caches) a separate pipeline
+    per stage - no need to invalidate anything manually.
 
     Returns:
-        (pipeline, config) - config is returned alongside so the UI
-        can read display settings (e.g. default top_k) without
-        reloading the file.
+        (pipeline, config)
     """
     config = load_config(config_path)
     set_seed(config["seed"])
@@ -48,11 +51,14 @@ def load_pipeline(config_path: str) -> tuple[RecommendationPipeline, dict]:
     backbone_name = config["model"]["backbone"]
     image_size = tuple(config["preprocessing"]["image_size"])
 
-    ids, embeddings = load_embeddings(config["embeddings"]["baseline_path"])
+    keys = STAGE_CONFIG[stage]
+    embeddings_path = config["embeddings"][keys["output_path"]]
+
+    ids, embeddings = load_embeddings(embeddings_path)
     index = CosineSimilarityIndex()
     index.build(ids, embeddings)
 
-    model = build_backbone(backbone_name, image_size)
+    model = load_stage_model(config, stage, backbone_name, image_size, logger)
 
     metadata_df = pd.read_csv(config["data"]["full_subset_csv"])
     metadata_df["id"] = metadata_df["id"].astype(str)
@@ -64,7 +70,7 @@ def load_pipeline(config_path: str) -> tuple[RecommendationPipeline, dict]:
         image_size=image_size,
         backbone=backbone_name,
     )
-    logger.info("Pipeline loaded and cached: %d items in catalog", len(ids))
+    logger.info("Pipeline loaded and cached for stage '%s': %d items in catalog", stage, len(ids))
     return pipeline, config
 
 
@@ -76,7 +82,18 @@ def main() -> None:
         "Ranking is by visual similarity (learned image embeddings), not category tags."
     )
 
-    pipeline, config = load_pipeline(CONFIG_PATH)
+    stage = st.sidebar.selectbox(
+        "Model",
+        options=list(STAGE_CONFIG.keys()),
+        index=list(STAGE_CONFIG.keys()).index(DEFAULT_STAGE),
+        format_func=lambda s: {
+            "baseline": "Baseline (ResNet50, no fine-tuning)",
+            "transfer_learning": "Transfer Learning (fine-tuned)",
+            "siamese": "Siamese Network (best - Precision@5: 0.9475)",
+        }.get(s, s),
+    )
+
+    pipeline, config = load_pipeline(CONFIG_PATH, stage)
     images_dir = Path(config["dataset"]["images_dir"])
 
     top_k = st.sidebar.slider(
@@ -85,7 +102,7 @@ def main() -> None:
         max_value=20,
         value=config["retrieval"]["top_k"],
     )
-    st.sidebar.caption(f"Backbone: {config['model']['backbone']} (baseline, not fine-tuned)")
+    st.sidebar.caption(f"Backbone: {config['model']['backbone']} | Active model: {stage}")
 
     uploaded_file = st.file_uploader(
         "Upload a product image", type=["jpg", "jpeg", "png"]

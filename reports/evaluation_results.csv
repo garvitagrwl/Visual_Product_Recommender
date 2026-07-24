@@ -1,0 +1,4 @@
+stage,num_queries,mean_latency_ms,median_latency_ms,embedding_generation_time_s,precision@5,recall@5,precision@10,recall@10
+baseline,480,796.42,885.12,302.473,0.9225,0.0154,0.9123,0.0305
+transfer_learning,480,786.48,883.66,,0.94,0.0157,0.9321,0.0312
+siamese,480,761.53,865.6,,0.9475,0.0158,0.9431,0.0315
