@@ -171,6 +171,55 @@ def build_labeled_dataset(
     return ds
 
 
+def build_triplet_dataset(
+    triplets_df: pd.DataFrame,
+    images_dir: str,
+    image_size: Tuple[int, int],
+    backbone: str,
+    batch_size: int,
+    training: bool = False,
+) -> tf.data.Dataset:
+    """Build a tf.data pipeline yielding ((anchor, positive, negative), dummy_label).
+
+    The dummy label is a zero placeholder - Keras's `.fit()` expects a
+    (x, y) signature, but the triplet loss function (src/training/losses.py)
+    computes loss purely from the three embeddings and ignores y_true
+    entirely.
+
+    Args:
+        triplets_df: Output of TripletGenerator.build().
+        images_dir: Directory containing the image files.
+        image_size: Target (height, width).
+        backbone: Backbone name, for correct normalization.
+        batch_size: Batch size.
+        training: If True, shuffles triplets each epoch.
+
+    Returns:
+        A batched, prefetched `tf.data.Dataset`.
+    """
+    anchor_paths = (images_dir.rstrip("/") + "/" + triplets_df["anchor_filename"]).tolist()
+    positive_paths = (images_dir.rstrip("/") + "/" + triplets_df["positive_filename"]).tolist()
+    negative_paths = (images_dir.rstrip("/") + "/" + triplets_df["negative_filename"]).tolist()
+
+    ds = tf.data.Dataset.from_tensor_slices((anchor_paths, positive_paths, negative_paths))
+
+    if training:
+        ds = ds.shuffle(buffer_size=len(anchor_paths), seed=42, reshuffle_each_iteration=True)
+
+    preprocess_fn = get_preprocess_fn(backbone)
+
+    def _map_fn(anchor_path, positive_path, negative_path):
+        anchor = preprocess_fn(_load_image(anchor_path, image_size))
+        positive = preprocess_fn(_load_image(positive_path, image_size))
+        negative = preprocess_fn(_load_image(negative_path, image_size))
+        dummy_label = tf.constant(0.0)
+        return (anchor, positive, negative), dummy_label
+
+    ds = ds.map(_map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    return ds
+
+
 def build_dataset(
     df: pd.DataFrame,
     images_dir: str,

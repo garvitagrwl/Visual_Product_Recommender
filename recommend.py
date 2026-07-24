@@ -1,28 +1,26 @@
-"""Similarity Search entry point - supports querying against either
-the baseline (Phase 4) or transfer-learning (Phase 6) embeddings.
+"""Similarity Search entry point - query against baseline,
+transfer_learning, or siamese embeddings, selected via --stage.
 
 Critical detail: the query image must be embedded with the SAME
 backbone weights that generated the catalog embeddings it's being
-compared against. Using fresh ImageNet weights to embed a query
-while comparing it to fine-tuned catalog embeddings would compare
-two different embedding spaces - so --stage controls both which
-embeddings file loads AND which backbone weights embed the query.
+compared against. --stage controls both which embeddings file loads
+AND (via build_embeddings.load_stage_model) which backbone weights
+embed the query - the two scripts share this logic so they can never
+drift apart on which weights a given stage means.
 
 Usage:
     python recommend.py --image path/to/query.jpg --stage baseline
     python recommend.py --image path/to/query.jpg --stage transfer_learning
-    python recommend.py --image path/to/query.jpg --stage transfer_learning --top-k 10
+    python recommend.py --image path/to/query.jpg --stage siamese
 """
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import pandas as pd
 
-from build_embeddings import STAGE_CONFIG_KEYS
-from src.feature_extraction.backbone import build_backbone
+from build_embeddings import STAGE_CONFIG, load_stage_model
 from src.feature_extraction.embedder import load_embeddings
 from src.retrieval.cosine_index import CosineSimilarityIndex
 from src.retrieval.query_pipeline import RecommendationPipeline
@@ -45,7 +43,7 @@ def main(config_path: str, image_path: str, stage: str, top_k: int | None) -> No
     backbone_name = config["model"]["backbone"]
     image_size = tuple(config["preprocessing"]["image_size"])
 
-    keys = STAGE_CONFIG_KEYS[stage]
+    keys = STAGE_CONFIG[stage]
     embeddings_path = config["embeddings"][keys["output_path"]]
 
     logger.info("Stage: %s | Loading catalog embeddings from %s", stage, embeddings_path)
@@ -56,17 +54,7 @@ def main(config_path: str, image_path: str, stage: str, top_k: int | None) -> No
     index.build(ids, embeddings)
 
     logger.info("Loading backbone: %s", backbone_name)
-    model = build_backbone(backbone_name, image_size)
-
-    if stage == "transfer_learning":
-        checkpoint_path = config["training"]["checkpoint_path"]
-        if not Path(checkpoint_path).exists():
-            raise FileNotFoundError(
-                f"No fine-tuned weights found at {checkpoint_path}. "
-                "Run `python train.py` (Phase 6) first, or use --stage baseline."
-            )
-        model.load_weights(checkpoint_path)
-        logger.info("Loaded fine-tuned weights from %s (query will use the SAME weights as the catalog)", checkpoint_path)
+    model = load_stage_model(config, stage, backbone_name, image_size, logger)
 
     metadata_df = pd.read_csv(config["data"]["full_subset_csv"])
     metadata_df["id"] = metadata_df["id"].astype(str)
@@ -92,14 +80,14 @@ def main(config_path: str, image_path: str, stage: str, top_k: int | None) -> No
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Similarity Search (baseline / transfer_learning)")
+    parser = argparse.ArgumentParser(description="Similarity Search (baseline / transfer_learning / siamese)")
     parser.add_argument("--config", type=str, default="configs/config.yaml")
     parser.add_argument("--image", type=str, required=True, help="Path to query image")
     parser.add_argument(
         "--stage",
         type=str,
         default="baseline",
-        choices=list(STAGE_CONFIG_KEYS.keys()),
+        choices=list(STAGE_CONFIG.keys()),
         help="Which embeddings/weights to use for the query",
     )
     parser.add_argument("--top-k", type=int, default=None, help="Override config's retrieval.top_k")
